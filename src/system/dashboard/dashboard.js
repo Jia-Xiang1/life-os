@@ -19,7 +19,7 @@ export function renderDashboard() {
           <p class="eyebrow">PERSONAL LIFE PLATFORM</p>
           <h1>Life OS</h1>
         </div>
-        <span class="version-pill">V1 · Build 01</span>
+        <span class="version-pill">V1 · Build 02</span>
       </header>
 
       <section class="welcome-card">

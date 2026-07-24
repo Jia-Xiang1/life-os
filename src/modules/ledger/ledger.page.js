@@ -2,8 +2,10 @@ import { bottomNavigation } from "../../system/dashboard/dashboard.js";
 import {
   addLedgerRecord,
   deleteLedgerRecord,
+  getLedgerRecord,
   getLedgerRecords,
   getMonthlyLedgerSummary,
+  updateLedgerRecord,
 } from "./ledger.service.js";
 
 const currency = new Intl.NumberFormat("zh-TW", {
@@ -12,19 +14,29 @@ const currency = new Intl.NumberFormat("zh-TW", {
   maximumFractionDigits: 0,
 });
 
+let editingRecordId = null;
+
 function todayValue() {
   const now = new Date();
   const offset = now.getTimezoneOffset();
   return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10);
 }
 
-function escapeHtml(value) {
-  return value
+function escapeHtml(value = "") {
+  return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function selected(value, expected) {
+  return value === expected ? "selected" : "";
+}
+
+function checked(value, expected) {
+  return value === expected ? "checked" : "";
 }
 
 function renderRecordList() {
@@ -57,7 +69,10 @@ function renderRecordList() {
                 </div>
                 <div class="record-amount ${record.type}">
                   <strong>${record.type === "income" ? "+" : "−"}${currency.format(record.amount)}</strong>
-                  <button type="button" class="record-delete" data-ledger-delete="${record.id}" aria-label="刪除紀錄">刪除</button>
+                  <div class="record-actions">
+                    <button type="button" data-ledger-edit="${record.id}">編輯</button>
+                    <button type="button" data-ledger-delete="${record.id}">刪除</button>
+                  </div>
                 </div>
               </article>`,
           )
@@ -68,6 +83,16 @@ function renderRecordList() {
 
 export function renderLedger() {
   const summary = getMonthlyLedgerSummary();
+  const editingRecord = editingRecordId ? getLedgerRecord(editingRecordId) : null;
+  const formRecord = editingRecord ?? {
+    type: "expense",
+    amount: "",
+    category: "",
+    note: "",
+    date: todayValue(),
+  };
+
+  if (editingRecordId && !editingRecord) editingRecordId = null;
 
   return `
     <main class="app-shell">
@@ -87,42 +112,52 @@ export function renderLedger() {
 
       <section class="card ledger-form-card">
         <div class="card-heading">
-          <div><p class="section-kicker">NEW RECORD</p><h2>新增一筆</h2></div>
+          <div>
+            <p class="section-kicker">${editingRecord ? "EDIT RECORD" : "NEW RECORD"}</p>
+            <h2>${editingRecord ? "編輯紀錄" : "新增一筆"}</h2>
+          </div>
+          ${editingRecord ? '<button class="text-button" type="button" data-ledger-cancel>取消</button>' : ""}
         </div>
 
         <form id="ledger-form" class="ledger-form">
           <div class="type-toggle" role="group" aria-label="收支類型">
-            <label><input type="radio" name="type" value="expense" checked><span>支出</span></label>
-            <label><input type="radio" name="type" value="income"><span>收入</span></label>
+            <label><input type="radio" name="type" value="expense" ${checked(formRecord.type, "expense")}><span>支出</span></label>
+            <label><input type="radio" name="type" value="income" ${checked(formRecord.type, "income")}><span>收入</span></label>
           </div>
 
           <label class="field">
             <span>金額</span>
-            <input name="amount" type="number" inputmode="numeric" min="1" step="1" placeholder="例如：120" required>
+            <input name="amount" type="number" inputmode="numeric" min="1" step="1" value="${escapeHtml(formRecord.amount)}" placeholder="例如：120" required>
           </label>
 
           <div class="form-grid">
             <label class="field">
               <span>日期</span>
-              <input name="date" type="date" value="${todayValue()}" required>
+              <input name="date" type="date" value="${escapeHtml(formRecord.date)}" required>
             </label>
             <label class="field">
               <span>分類</span>
               <select name="category" required>
                 <option value="">請選擇</option>
-                <option>餐飲</option><option>交通</option><option>購物</option><option>生活</option>
-                <option>娛樂</option><option>薪資</option><option>獎金</option><option>其他</option>
+                <option ${selected(formRecord.category, "餐飲")}>餐飲</option>
+                <option ${selected(formRecord.category, "交通")}>交通</option>
+                <option ${selected(formRecord.category, "購物")}>購物</option>
+                <option ${selected(formRecord.category, "生活")}>生活</option>
+                <option ${selected(formRecord.category, "娛樂")}>娛樂</option>
+                <option ${selected(formRecord.category, "薪資")}>薪資</option>
+                <option ${selected(formRecord.category, "獎金")}>獎金</option>
+                <option ${selected(formRecord.category, "其他")}>其他</option>
               </select>
             </label>
           </div>
 
           <label class="field">
             <span>備註</span>
-            <input name="note" type="text" maxlength="60" placeholder="選填">
+            <input name="note" type="text" maxlength="60" value="${escapeHtml(formRecord.note)}" placeholder="選填">
           </label>
 
           <p class="form-message" data-ledger-message aria-live="polite"></p>
-          <button class="primary-button ledger-submit" type="submit">儲存紀錄</button>
+          <button class="primary-button ledger-submit" type="submit">${editingRecord ? "儲存修改" : "儲存紀錄"}</button>
         </form>
       </section>
 
@@ -138,25 +173,46 @@ export function bindLedgerPage(refresh) {
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(form);
+    const input = {
+      type: String(data.get("type")),
+      amount: Number(data.get("amount")),
+      category: String(data.get("category") ?? ""),
+      note: String(data.get("note") ?? ""),
+      date: String(data.get("date") ?? ""),
+    };
 
     try {
-      addLedgerRecord({
-        type: String(data.get("type")),
-        amount: Number(data.get("amount")),
-        category: String(data.get("category") ?? ""),
-        note: String(data.get("note") ?? ""),
-        date: String(data.get("date") ?? ""),
-      });
+      if (editingRecordId) {
+        updateLedgerRecord(editingRecordId, input);
+        editingRecordId = null;
+      } else {
+        addLedgerRecord(input);
+      }
       refresh();
     } catch (error) {
       if (message) message.textContent = error instanceof Error ? error.message : "儲存失敗";
     }
   });
 
+  document.querySelector("[data-ledger-cancel]")?.addEventListener("click", () => {
+    editingRecordId = null;
+    refresh();
+  });
+
+  document.querySelectorAll("[data-ledger-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      editingRecordId = button.dataset.ledgerEdit ?? null;
+      refresh();
+      document.querySelector("#ledger-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
   document.querySelectorAll("[data-ledger-delete]").forEach((button) => {
     button.addEventListener("click", () => {
       if (!window.confirm("確定要刪除這筆紀錄嗎？")) return;
-      deleteLedgerRecord(button.dataset.ledgerDelete ?? "");
+      const recordId = button.dataset.ledgerDelete ?? "";
+      deleteLedgerRecord(recordId);
+      if (editingRecordId === recordId) editingRecordId = null;
       refresh();
     });
   });
