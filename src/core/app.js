@@ -1,21 +1,26 @@
 import { createRouter } from "./router.js";
 import { renderDashboard } from "../system/dashboard/dashboard.js";
 import { renderSettings } from "../system/settings/settings.js";
-import { renderLedger } from "../modules/ledger/ledger.js";
+import { bindLedgerPage, renderLedger } from "../modules/ledger/index.js";
 
 export function createApp(root) {
   if (!root) throw new Error("找不到 #app 容器");
 
-  const renderPage = (renderer) => () => {
-    root.innerHTML = renderer();
-    bindModuleToggles();
+  const renderPage = (renderer, binder) => () => {
+    const refresh = () => {
+      root.innerHTML = renderer();
+      bindModuleToggles();
+      binder?.(refresh);
+    };
+
+    refresh();
   };
 
   const router = createRouter(
     {
       "/": renderPage(renderDashboard),
       "/settings": renderPage(renderSettings),
-      "/ledger": renderPage(renderLedger),
+      "/ledger": renderPage(renderLedger, bindLedgerPage),
       "/404": () => {
         root.innerHTML = `
           <main class="app-shell">
